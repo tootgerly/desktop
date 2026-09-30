@@ -17,12 +17,10 @@ import {
   ILargeTextDiff,
 } from '../../models/diff'
 import { Loading } from '../lib/loading'
-import {
-  getFileContents,
-  getLineFilters,
-  IFileContents,
-} from './syntax-highlighting'
+import { getFileContents, IFileContents } from './syntax-highlighting'
 import { getTextDiffWithBottomDummyHunk } from './text-diff-expansion'
+import { textDiffEquals } from './diff-helpers'
+import noop from 'lodash/noop'
 
 /**
  * The time (in milliseconds) we allow when loading a diff before
@@ -40,25 +38,56 @@ interface ISeamlessDiffSwitcherProps {
    * diff's lines can be selected, e.g., displaying a change in the working
    * directory.
    */
+  // Used in getDerivedStateFromProps, no-unused-prop-types doesn't know that
+  // eslint-disable-next-line react/no-unused-prop-types
   readonly readOnly: boolean
 
   /** The file whose diff should be displayed. */
   readonly file: ChangedFile
 
   /** Called when the includedness of lines or a range of lines has changed. */
+  // Used in getDerivedStateFromProps, no-unused-prop-types doesn't know that
+  // eslint-disable-next-line react/no-unused-prop-types
   readonly onIncludeChanged?: (diffSelection: DiffSelection) => void
 
   /** The diff that should be rendered */
   readonly diff: IDiff | null
 
+  /**
+   * Externally-supplied contents of the old and new files backing the current
+   * text diff.
+   *
+   * When this prop is defined (including `null`), the switcher treats it as the
+   * authoritative source for syntax highlighting and context expansion and does
+   * *not* fetch file contents from git. This is required for synthetic diffs
+   * whose sides don't correspond to an addressable git revision (e.g. the
+   * Copilot conflict resolution diffs, where the base is the on-disk conflicted
+   * file and the target is arbitrary resolved content). A value of `null` means
+   * the contents aren't ready yet and the diff should keep showing as loading.
+   *
+   * When left `undefined` the switcher loads contents from git as usual.
+   */
+  readonly externalFileContents?: IFileContents | null
+
   /** The type of image diff to display. */
+  // Used in getDerivedStateFromProps, no-unused-prop-types doesn't know that
+  // eslint-disable-next-line react/no-unused-prop-types
   readonly imageDiffType: ImageDiffType
 
   /** Hiding whitespace in diff. */
+  // Used in getDerivedStateFromProps, no-unused-prop-types doesn't know that
+  // eslint-disable-next-line react/no-unused-prop-types
   readonly hideWhitespaceInDiff: boolean
 
   /** Whether we should display side by side diffs. */
+  // Used in getDerivedStateFromProps, no-unused-prop-types doesn't know that
+  // eslint-disable-next-line react/no-unused-prop-types
   readonly showSideBySideDiff: boolean
+
+  /** Whether or not to show the diff check marks indicating inclusion in a commit */
+  // Used in getDerivedStateFromProps, no-unused-prop-types doesn't know that
+  // eslint-disable-next-line react/no-unused-prop-types
+  readonly showDiffCheckMarks: boolean
 
   /** Whether we should show a confirmation dialog when the user discards changes */
   readonly askForConfirmationOnDiscardChanges?: boolean
@@ -67,24 +96,37 @@ interface ISeamlessDiffSwitcherProps {
    * Called when the user requests to open a binary file in an the
    * system-assigned application for said file type.
    */
+  // Used in getDerivedStateFromProps, no-unused-prop-types doesn't know that
+  // eslint-disable-next-line react/no-unused-prop-types
   readonly onOpenBinaryFile: (fullPath: string) => void
+
+  /** Called when the user requests to open a submodule. */
+  // Used in getDerivedStateFromProps, no-unused-prop-types doesn't know that
+  // eslint-disable-next-line react/no-unused-prop-types
+  readonly onOpenSubmodule?: (fullPath: string) => void
 
   /**
    * Called when the user is viewing an image diff and requests
    * to change the diff presentation mode.
    */
+  // Used in getDerivedStateFromProps, no-unused-prop-types doesn't know that
+  // eslint-disable-next-line react/no-unused-prop-types
   readonly onChangeImageDiffType: (type: ImageDiffType) => void
 
   /*
    * Called when the user wants to discard a selection of the diff.
    * Only applicable when readOnly is false.
    */
+  // Used in getDerivedStateFromProps, no-unused-prop-types doesn't know that
+  // eslint-disable-next-line react/no-unused-prop-types
   readonly onDiscardChanges?: (
     diff: ITextDiff,
     diffSelection: DiffSelection
   ) => void
 
   /** Called when the user changes the hide whitespace in diffs setting. */
+  // Used in getDerivedStateFromProps, no-unused-prop-types doesn't know that
+  // eslint-disable-next-line react/no-unused-prop-types
   readonly onHideWhitespaceInDiffChanged: (checked: boolean) => void
 }
 
@@ -116,9 +158,6 @@ interface ISeamlessDiffSwitcherState {
   readonly fileContents: IFileContents | null
 }
 
-/** I'm super useful */
-function noop() {}
-
 function isSameFile(prevFile: ChangedFile, newFile: ChangedFile) {
   return prevFile === newFile || prevFile.id === newFile.id
 }
@@ -128,7 +167,7 @@ function isSameDiff(prevDiff: IDiff, newDiff: IDiff) {
     prevDiff === newDiff ||
     (isTextDiff(prevDiff) &&
       isTextDiff(newDiff) &&
-      prevDiff.text === newDiff.text)
+      textDiffEquals(prevDiff, newDiff))
   )
 }
 
@@ -245,6 +284,20 @@ export class SeamlessDiffSwitcher extends React.Component<
       return
     }
 
+    // When contents are supplied externally we don't fetch anything from git;
+    // we just apply what the parent gave us (once it corresponds to the file
+    // being displayed).
+    if (this.props.externalFileContents !== undefined) {
+      const fileContents = this.props.externalFileContents
+      if (fileContents === null || !isSameFile(fileContents.file, fileToLoad)) {
+        // Contents aren't ready (or are for a different file) yet.
+        return
+      }
+
+      this.applyFileContents(diff, fileContents)
+      return
+    }
+
     // Are we currently loading file contents for this file and is the diff
     // still the same? If so we can wait for that to load
     if (
@@ -257,11 +310,9 @@ export class SeamlessDiffSwitcher extends React.Component<
 
     this.loadingState = { file: fileToLoad, diff }
 
-    const lineFilters = getLineFilters(diff.hunks)
     const fileContents = await getFileContents(
       this.props.repository,
-      fileToLoad,
-      lineFilters
+      fileToLoad
     )
 
     this.loadingState = null
@@ -271,6 +322,13 @@ export class SeamlessDiffSwitcher extends React.Component<
       return
     }
 
+    this.applyFileContents(diff, fileContents)
+  }
+
+  private applyFileContents(
+    diff: ITextDiff | ILargeTextDiff,
+    fileContents: IFileContents
+  ) {
     const newDiff =
       fileContents.canBeExpanded && diff.kind === DiffType.Text
         ? getTextDiffWithBottomDummyHunk(
@@ -311,10 +369,12 @@ export class SeamlessDiffSwitcher extends React.Component<
       readOnly,
       hideWhitespaceInDiff,
       showSideBySideDiff,
+      showDiffCheckMarks,
       onIncludeChanged,
       onDiscardChanges,
       file,
       onOpenBinaryFile,
+      onOpenSubmodule,
       onChangeImageDiffType,
       onHideWhitespaceInDiffChanged,
     } = this.state.propSnapshot
@@ -346,9 +406,11 @@ export class SeamlessDiffSwitcher extends React.Component<
             askForConfirmationOnDiscardChanges={
               this.props.askForConfirmationOnDiscardChanges
             }
+            showDiffCheckMarks={showDiffCheckMarks}
             onIncludeChanged={isLoadingDiff ? noop : onIncludeChanged}
             onDiscardChanges={isLoadingDiff ? noop : onDiscardChanges}
             onOpenBinaryFile={isLoadingDiff ? noop : onOpenBinaryFile}
+            onOpenSubmodule={isLoadingDiff ? noop : onOpenSubmodule}
             onChangeImageDiffType={isLoadingDiff ? noop : onChangeImageDiffType}
             onHideWhitespaceInDiffChanged={
               isLoadingDiff ? noop : onHideWhitespaceInDiffChanged

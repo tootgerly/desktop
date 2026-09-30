@@ -1,6 +1,5 @@
 .sandboxed-markdown-iframe-container {
   position: relative;
-  min-height: 50px;
 
   .sandboxed-markdown-component {
     // With combination of setting height of containing div.
@@ -18,5 +17,7 @@
     padding: 0;
     margin: 0;
     box-shadow: none;
+
+    overflow: hidden;
   }
 }

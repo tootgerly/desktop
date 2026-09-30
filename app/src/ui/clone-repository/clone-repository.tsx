@@ -1,15 +1,18 @@
 import * as Path from 'path'
 import * as React from 'react'
-
-import { remote } from 'electron'
-import { readdir } from 'fs-extra'
 import { Dispatcher } from '../dispatcher'
 import { getDefaultDir, setDefaultDir } from '../lib/default-dir'
-import { Account } from '../../models/account'
+import {
+  Account,
+  isDotComAccount,
+  isEnterpriseAccount,
+} from '../../models/account'
+import { FoldoutType } from '../../lib/app-state'
 import {
   IRepositoryIdentifier,
   parseRepositoryIdentifier,
   parseRemote,
+  sanitizeCloneName,
 } from '../../lib/remote-parsing'
 import { findAccountForRemoteURL } from '../../lib/find-account'
 import { API, IAPIRepository, IAPIRepositoryCloneInfo } from '../../lib/api'
@@ -24,18 +27,16 @@ import { IAccountRepositories } from '../../lib/stores/api-repositories-store'
 import { merge } from '../../lib/merge'
 import { ClickSource } from '../lib/list'
 import { OkCancelButtonGroup } from '../dialog/ok-cancel-button-group'
-import { enableSaveDialogOnCloneRepository } from '../../lib/feature-flag'
-import { showOpenDialog } from '../main-process-proxy'
+import { showOpenDialog, showSaveDialog } from '../main-process-proxy'
+import { readdir } from 'fs/promises'
+import { isTopMostDialog } from '../dialog/is-top-most'
+import memoizeOne from 'memoize-one'
 
 interface ICloneRepositoryProps {
   readonly dispatcher: Dispatcher
   readonly onDismissed: () => void
 
-  /** The logged in accounts. */
-  readonly dotComAccount: Account | null
-
-  /** The logged in Enterprise account. */
-  readonly enterpriseAccount: Account | null
+  readonly accounts: ReadonlyArray<Account>
 
   /** The initial URL or `owner/name` shortcut to use. */
   readonly initialURL: string | null
@@ -67,6 +68,9 @@ interface ICloneRepositoryProps {
    * available for cloning.
    */
   readonly onRefreshRepositories: (account: Account) => void
+
+  /** Whether the dialog is the top most in the dialog stack */
+  readonly isTopMost: boolean
 }
 
 interface ICloneRepositoryState {
@@ -79,7 +83,7 @@ interface ICloneRepositoryState {
    *
    *  See the onWindowFocus method for more information.
    */
-  readonly initialPath: string
+  readonly initialPath: string | null
 
   /** Are we currently trying to load the entered repository? */
   readonly loading: boolean
@@ -116,10 +120,12 @@ interface IBaseTabState {
   readonly lastParsedIdentifier: IRepositoryIdentifier | null
 
   /** The local path to clone to. */
-  readonly path: string
+  readonly path: string | null
 
   /** The user-entered URL or `owner/name` shortcut. */
   readonly url: string
+
+  readonly selectedAccount: Account | null
 }
 
 interface IUrlTabState extends IBaseTabState {
@@ -150,16 +156,38 @@ export class CloneRepository extends React.Component<
   ICloneRepositoryProps,
   ICloneRepositoryState
 > {
+  private checkIsTopMostDialog = isTopMostDialog(
+    () => {
+      this.validatePath()
+      window.addEventListener('focus', this.onWindowFocus)
+    },
+    () => {
+      window.removeEventListener('focus', this.onWindowFocus)
+    }
+  )
+
+  private getAccountsForTab = memoizeOne(
+    (tab: CloneRepositoryTab, accounts: ReadonlyArray<Account>) =>
+      tab === CloneRepositoryTab.Generic
+        ? []
+        : accounts.filter(
+            tab === CloneRepositoryTab.DotCom
+              ? isDotComAccount
+              : isEnterpriseAccount
+          )
+  )
+
   public constructor(props: ICloneRepositoryProps) {
     super(props)
 
-    const defaultDirectory = getDefaultDir()
+    const defaultDirectory = null
 
     const initialBaseTabState: IBaseTabState = {
       error: null,
       lastParsedIdentifier: null,
       path: defaultDirectory,
       url: this.props.initialURL || '',
+      selectedAccount: null,
     }
 
     this.state = {
@@ -182,12 +210,20 @@ export class CloneRepository extends React.Component<
         ...initialBaseTabState,
       },
     }
+
+    this.initializePath()
   }
 
   public componentDidUpdate(prevProps: ICloneRepositoryProps) {
     if (prevProps.selectedTab !== this.props.selectedTab) {
       this.validatePath()
     }
+
+    if (prevProps.initialURL !== this.props.initialURL) {
+      this.updateUrl(this.props.initialURL || '')
+    }
+
+    this.checkIsTopMostDialog(this.props.isTopMost)
   }
 
   public componentDidMount() {
@@ -196,11 +232,32 @@ export class CloneRepository extends React.Component<
       this.updateUrl(initialURL)
     }
 
-    window.addEventListener('focus', this.onWindowFocus)
+    this.checkIsTopMostDialog(this.props.isTopMost)
   }
 
-  public componentWillUnmount() {
-    window.removeEventListener('focus', this.onWindowFocus)
+  public componentWillUnmount(): void {
+    this.checkIsTopMostDialog(false)
+  }
+
+  private initializePath = async () => {
+    const initialPath = await getDefaultDir()
+    const dotComTabState = { ...this.state.dotComTabState, path: initialPath }
+    const enterpriseTabState = {
+      ...this.state.enterpriseTabState,
+      path: initialPath,
+    }
+    const urlTabState = { ...this.state.urlTabState, path: initialPath }
+    this.setState({
+      initialPath,
+      dotComTabState,
+      enterpriseTabState,
+      urlTabState,
+    })
+
+    // Update the local path based on the current url now that we have an
+    // initial path
+    const selectedTabState = this.getSelectedTabState()
+    this.updateUrl(selectedTabState.url)
   }
 
   public render() {
@@ -217,18 +274,28 @@ export class CloneRepository extends React.Component<
           onTabClicked={this.onTabClicked}
           selectedIndex={this.props.selectedTab}
         >
-          <span>GitHub.com</span>
-          <span>GitHub Enterprise</span>
-          <span>URL</span>
+          <span id="dotcom-tab">GitHub.com</span>
+          <span id="enterprise-tab">GitHub Enterprise</span>
+          <span id="url-tab">URL</span>
         </TabBar>
 
         {error ? <DialogError>{error.message}</DialogError> : null}
 
-        {this.renderActiveTab()}
+        <div role="tabpanel" aria-labelledby={this.getSelectedTabId()}>
+          {this.renderActiveTab()}
+        </div>
 
         {this.renderFooter()}
       </Dialog>
     )
+  }
+
+  private getSelectedTabId = () => {
+    return this.props.selectedTab === CloneRepositoryTab.DotCom
+      ? 'dotcom-tab'
+      : this.props.selectedTab === CloneRepositoryTab.Enterprise
+      ? 'enterprise-tab'
+      : 'url-tab'
   }
 
   private checkIfCloningDisabled = () => {
@@ -237,7 +304,11 @@ export class CloneRepository extends React.Component<
     const { loading } = this.state
 
     const disabled =
-      url.length === 0 || path.length === 0 || loading || error !== null
+      url.length === 0 ||
+      path == null ||
+      path.length === 0 ||
+      loading ||
+      error !== null
 
     return disabled
   }
@@ -276,7 +347,7 @@ export class CloneRepository extends React.Component<
         const tabState = this.state.urlTabState
         return (
           <CloneGenericRepository
-            path={tabState.path}
+            path={tabState.path ?? ''}
             url={tabState.url}
             onPathChanged={this.onPathChanged}
             onUrlChanged={this.updateUrl}
@@ -286,21 +357,24 @@ export class CloneRepository extends React.Component<
 
       case CloneRepositoryTab.DotCom:
       case CloneRepositoryTab.Enterprise: {
-        const account = this.getAccountForTab(tab)
-        if (!account) {
+        const tabState = this.getGitHubTabState(tab)
+        const tabAccounts = this.getAccountsForTab(tab, this.props.accounts)
+        const selectedAccount = this.getAccountForTab(tab)
+
+        if (!selectedAccount) {
           return <DialogContent>{this.renderSignIn(tab)}</DialogContent>
         } else {
-          const accountState = this.props.apiRepositories.get(account)
+          const accountState = this.props.apiRepositories.get(selectedAccount)
           const repositories =
             accountState === undefined ? null : accountState.repositories
           const loading =
             accountState === undefined ? false : accountState.loading
-          const tabState = this.getGitHubTabState(tab)
 
           return (
             <CloneGithubRepository
-              path={tabState.path}
-              account={account}
+              path={tabState.path ?? ''}
+              account={selectedAccount}
+              accounts={tabAccounts}
               selectedItem={tabState.selectedItem}
               onSelectionChanged={this.onSelectionChanged}
               onPathChanged={this.onPathChanged}
@@ -311,6 +385,7 @@ export class CloneRepository extends React.Component<
               filterText={tabState.filterText}
               onFilterTextChanged={this.onFilterTextChanged}
               onItemClicked={this.onItemClicked}
+              onSelectedAccountChanged={this.onSelectedAccountChanged}
             />
           )
         }
@@ -320,15 +395,26 @@ export class CloneRepository extends React.Component<
     }
   }
 
-  private getAccountForTab(tab: CloneRepositoryTab): Account | null {
-    switch (tab) {
-      case CloneRepositoryTab.DotCom:
-        return this.props.dotComAccount
-      case CloneRepositoryTab.Enterprise:
-        return this.props.enterpriseAccount
-      default:
-        return null
+  private onSelectedAccountChanged = (account: Account) => {
+    if (this.props.selectedTab !== CloneRepositoryTab.Generic) {
+      this.setGitHubTabState(
+        { selectedAccount: account },
+        this.props.selectedTab
+      )
     }
+  }
+
+  private getAccountForTab(tab: CloneRepositoryTab): Account | null {
+    const tabState = this.getTabState(tab)
+    const tabAccounts = this.getAccountsForTab(tab, this.props.accounts)
+    const selectedAccount =
+      (tabState.selectedAccount
+        ? tabAccounts.find(
+            a => a.endpoint === tabState.selectedAccount?.endpoint
+          )
+        : undefined) ?? tabAccounts.at(0)
+
+    return selectedAccount ?? null
   }
 
   private getGitHubTabState(
@@ -448,8 +534,8 @@ export class CloneRepository extends React.Component<
             onAction={this.signInEnterprise}
           >
             <div>
-              If you have a GitHub Enterprise or AE account at work, sign in to
-              it to get access to your repositories.
+              If you are using GitHub Enterprise at work, sign in to it to get
+              access to your repositories.
             </div>
           </CallToAction>
         )
@@ -493,7 +579,7 @@ export class CloneRepository extends React.Component<
         this.setSelectedTabState({ error: null })
       }
     } else {
-      const pathValidation = await this.validateEmptyFolder(path)
+      const pathValidation = await this.validateClonePath(path)
 
       // We only care about the result if the path hasn't
       // changed since we went async
@@ -505,7 +591,10 @@ export class CloneRepository extends React.Component<
   }
 
   private onChooseDirectory = async () => {
-    if (enableSaveDialogOnCloneRepository()) {
+    // We received feedback (#12812) that using the save dialog is confusing on
+    // windows due to appearing to require a file selection. This is not the case
+    // on mac where it more clearly shows directory creation.
+    if (__DARWIN__) {
       return this.onChooseWithSaveDialog()
     }
 
@@ -523,9 +612,10 @@ export class CloneRepository extends React.Component<
 
     const tabState = this.getSelectedTabState()
     const lastParsedIdentifier = tabState.lastParsedIdentifier
-    const directory = lastParsedIdentifier
-      ? Path.join(path, lastParsedIdentifier.name)
-      : path
+    const safeName = lastParsedIdentifier
+      ? sanitizeCloneName(lastParsedIdentifier.name)
+      : null
+    const directory = safeName ? Path.join(path, safeName) : path
 
     this.setSelectedTabState(
       { path: directory, error: null },
@@ -536,24 +626,23 @@ export class CloneRepository extends React.Component<
   }
 
   private onChooseWithSaveDialog = async (): Promise<string | undefined> => {
-    const window = remote.getCurrentWindow()
     const tabState = this.getSelectedTabState()
 
-    const { canceled, filePath } = await remote.dialog.showSaveDialog(window, {
+    const path = await showSaveDialog({
       buttonLabel: 'Select',
       nameFieldLabel: 'Clone As:',
       showsTagField: false,
-      defaultPath: tabState.path,
+      defaultPath: tabState.path ?? '',
       properties: ['createDirectory'],
     })
 
-    if (canceled || filePath == null) {
+    if (path == null) {
       return
     }
 
-    this.setSelectedTabState({ path: filePath, error: null }, this.validatePath)
+    this.setSelectedTabState({ path, error: null }, this.validatePath)
 
-    return filePath
+    return path
   }
 
   private updateUrl = async (url: string) => {
@@ -561,18 +650,27 @@ export class CloneRepository extends React.Component<
     const tabState = this.getSelectedTabState()
     const lastParsedIdentifier = tabState.lastParsedIdentifier
 
+    // If there is no path yet, just update the url
+    if (tabState.path === null) {
+      this.setSelectedTabState({ url }, this.validatePath)
+      return
+    }
+
+    const safeName = parsed ? sanitizeCloneName(parsed.name) : null
+
     let newPath: string
 
+    const dirPath = tabState.path
     if (lastParsedIdentifier) {
-      if (parsed) {
-        newPath = Path.join(Path.dirname(tabState.path), parsed.name)
+      if (safeName) {
+        newPath = Path.join(Path.dirname(dirPath), safeName)
       } else {
-        newPath = Path.dirname(tabState.path)
+        newPath = Path.dirname(dirPath)
       }
-    } else if (parsed) {
-      newPath = Path.join(tabState.path, parsed.name)
+    } else if (safeName) {
+      newPath = Path.join(dirPath, safeName)
     } else {
-      newPath = tabState.path
+      newPath = dirPath
     }
 
     this.setSelectedTabState(
@@ -585,7 +683,23 @@ export class CloneRepository extends React.Component<
     )
   }
 
-  private async validateEmptyFolder(path: string): Promise<null | Error> {
+  /** Validate the destination before cloning can create files in it. */
+  private async validateClonePath(path: string | null): Promise<null | Error> {
+    if (path === null) {
+      return new Error(
+        'Unable to read path on disk. Please check the path and try again.'
+      )
+    }
+
+    if (
+      __DARWIN__ &&
+      Path.basename(Path.resolve(path)).toLowerCase().endsWith('.app')
+    ) {
+      return new Error(
+        'The local path cannot end in .app on macOS. Choose a different folder name to avoid creating an application bundle.'
+      )
+    }
+
     try {
       const directoryFiles = await readdir(path)
 
@@ -626,16 +740,11 @@ export class CloneRepository extends React.Component<
   private async resolveCloneInfo(): Promise<IAPIRepositoryCloneInfo | null> {
     const { url, lastParsedIdentifier } = this.getSelectedTabState()
 
-    const accounts = new Array<Account>()
-    if (this.props.dotComAccount) {
-      accounts.push(this.props.dotComAccount)
+    if (url.endsWith('.wiki.git')) {
+      return { url }
     }
 
-    if (this.props.enterpriseAccount) {
-      accounts.push(this.props.enterpriseAccount)
-    }
-
-    const account = await findAccountForRemoteURL(url, accounts)
+    const account = await findAccountForRemoteURL(url, this.props.accounts)
     if (lastParsedIdentifier !== null && account !== null) {
       const api = API.fromAccount(account)
       const { owner, name } = lastParsedIdentifier
@@ -662,9 +771,23 @@ export class CloneRepository extends React.Component<
   private clone = async () => {
     this.setState({ loading: true })
 
-    const cloneInfo = await this.resolveCloneInfo()
     const { path } = this.getSelectedTabState()
 
+    if (path == null) {
+      const error = new Error(`Directory could not be created at this path.`)
+      this.setState({ loading: false })
+      this.setSelectedTabState({ error })
+      return
+    }
+
+    const pathError = await this.validateClonePath(path)
+    if (pathError !== null) {
+      this.setState({ loading: false })
+      this.setSelectedTabState({ error: pathError })
+      return
+    }
+
+    const cloneInfo = await this.resolveCloneInfo()
     if (!cloneInfo) {
       const error = new Error(
         `We couldn't find that repository. Check that you are logged in, the network is accessible, and the URL or repository alias are spelled correctly.`
@@ -676,6 +799,7 @@ export class CloneRepository extends React.Component<
 
     const { url, defaultBranch } = cloneInfo
 
+    this.props.dispatcher.closeFoldout(FoldoutType.Repository)
     try {
       this.cloneImpl(url.trim(), path, defaultBranch)
     } catch (e) {

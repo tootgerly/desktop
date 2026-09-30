@@ -1,3 +1,16 @@
+import type {
+  CopilotModelsByAccount,
+  CopilotModelSelectionsByAccount,
+  CopilotQuotaSnapshotsByAccount,
+} from './stores/copilot-store'
+import type { IBYOKProvider } from './copilot/byok'
+import type { IConflictResolutionModelDisplay } from './copilot/conflict-resolution-model'
+import type {
+  IFileResolution,
+  IConflictResolutionProgress,
+  ICopilotResolutionSummary,
+  ICopilotSkippedFile,
+} from './copilot-conflict-resolution'
 import { Account } from '../models/account'
 import { CommitIdentity } from '../models/commit-identity'
 import { IDiff, ImageDiffType } from '../models/diff'
@@ -6,13 +19,17 @@ import { Branch, IAheadBehind } from '../models/branch'
 import { Tip } from '../models/tip'
 import { Commit } from '../models/commit'
 import { CommittedFileChange, WorkingDirectoryStatus } from '../models/status'
+import { WorktreeEntry } from '../models/worktree'
 import { CloningRepository } from '../models/cloning-repository'
 import { IMenu } from '../models/app-menu'
 import { IRemote } from '../models/remote'
 import { CloneRepositoryTab } from '../models/clone-repository-tab'
 import { BranchesTab } from '../models/branches-tab'
-import { PullRequest } from '../models/pull-request'
-import { IAuthor } from '../models/author'
+import {
+  PullRequest,
+  PullRequestSuggestedNextAction,
+} from '../models/pull-request'
+import { Author } from '../models/author'
 import { MergeTreeResult } from '../models/merge'
 import { ICommitMessage } from '../models/commit-message'
 import {
@@ -22,18 +39,13 @@ import {
   ICloneProgress,
   IMultiCommitOperationProgress,
 } from '../models/progress'
-import { Popup } from '../models/popup'
 
 import { SignInState } from './stores/sign-in-store'
 
 import { WindowState } from './window-state'
 import { Shell } from './shells'
 
-import {
-  ApplicableTheme,
-  ApplicationTheme,
-  ICustomTheme,
-} from '../ui/lib/application-theme'
+import { ApplicableTheme, ApplicationTheme } from '../ui/lib/application-theme'
 import { IAccountRepositories } from './stores/api-repositories-store'
 import { ManualConflictResolution } from '../models/manual-conflict-resolution'
 import { Banner } from '../models/banner'
@@ -46,8 +58,17 @@ import {
   MultiCommitOperationDetail,
   MultiCommitOperationStep,
 } from '../models/multi-commit-operation'
-import { DragAndDropIntroType } from '../ui/history/drag-and-drop-intro'
-import { IChangesetData } from './git'
+import type {
+  HookProgress,
+  IChangesetData,
+  TerminalOutputListener,
+} from './git'
+import { Popup } from '../models/popup'
+import { RepoRulesInfo } from '../models/repo-rules'
+import { IAPIRepoRuleset } from './api'
+import { ICustomIntegration } from './custom-integration'
+import { Emoji } from './emoji'
+import { IUpdateState } from '../ui/lib/update-store'
 
 export enum SelectionType {
   Repository,
@@ -100,13 +121,23 @@ export interface IAppState {
   /**
    * The current state of the window, ie maximized, minimized full-screen etc.
    */
-  readonly windowState: WindowState
+  readonly windowState: WindowState | null
 
   /**
    * The current zoom factor of the window represented as a fractional number
    * where 1 equals 100% (ie actual size) and 2 represents 200%.
    */
   readonly windowZoomFactor: number
+
+  /**
+   * Whether or not the currently active element is itself, or is contained
+   * within, a resizable component. This is used to determine whether or not
+   * to enable the Expand/Contract pane menu items. Note that this doesn't
+   * necessarily mean that keyboard resides within the resizable component since
+   * using the Windows in-app menu bar will steal focus from the currently
+   * active element (but return it once closed).
+   */
+  readonly resizablePaneActive: boolean
 
   /**
    * A value indicating whether or not the current application
@@ -117,6 +148,7 @@ export interface IAppState {
   readonly showWelcomeFlow: boolean
   readonly focusCommitMessage: boolean
   readonly currentPopup: Popup | null
+  readonly allPopups: ReadonlyArray<Popup>
   readonly currentFoldout: Foldout | null
   readonly currentBanner: Banner | null
 
@@ -146,10 +178,10 @@ export interface IAppState {
    */
   readonly appMenuState: ReadonlyArray<IMenu>
 
-  readonly errors: ReadonlyArray<Error>
+  readonly errorCount: number
 
   /** Map from the emoji shortcut (e.g., :+1:) to the image's local path. */
-  readonly emoji: Map<string, string>
+  readonly emoji: Map<string, Emoji>
 
   /**
    * The width of the repository sidebar.
@@ -171,6 +203,18 @@ export interface IAppState {
   /** The width of the files list in the stash view */
   readonly stashedFilesWidth: IConstrainedValue
 
+  /** The width of the files list in the pull request files changed view */
+  readonly pullRequestFilesListWidth: IConstrainedValue
+
+  /** The width of the resizable branch drop down button in the toolbar. */
+  readonly branchDropdownWidth: IConstrainedValue
+
+  /** The width of the resizable worktree drop down button in the toolbar. */
+  readonly worktreeDropdownWidth: IConstrainedValue
+
+  /** The width of the resizable push/pull button in the toolbar. */
+  readonly pushPullButtonWidth: IConstrainedValue
+
   /**
    * Used to highlight access keys throughout the app when the
    * Alt key is pressed. Only applicable on non-macOS platforms.
@@ -180,8 +224,14 @@ export interface IAppState {
   /** Whether we should show the update banner */
   readonly isUpdateAvailableBannerVisible: boolean
 
+  /** Whether there is an update to showcase */
+  readonly isUpdateShowcaseVisible: boolean
+
   /** Whether we should ask the user to move the app to /Applications */
   readonly askToMoveToApplicationsFolderSetting: boolean
+
+  /** Whether we should use an external credential helper for third-party private repositories */
+  readonly useExternalCredentialHelper: boolean
 
   /** Whether we should show a confirmation dialog */
   readonly askForConfirmationOnRepositoryRemoval: boolean
@@ -189,8 +239,29 @@ export interface IAppState {
   /** Whether we should show a confirmation dialog */
   readonly askForConfirmationOnDiscardChanges: boolean
 
+  /** Whether we should show a confirmation dialog */
+  readonly askForConfirmationOnDiscardChangesPermanently: boolean
+
+  /** Should the app prompt the user to confirm a discard stash */
+  readonly askForConfirmationOnDiscardStash: boolean
+
+  /** Should the app prompt the user to confirm a commit checkout? */
+  readonly askForConfirmationOnCheckoutCommit: boolean
+
   /** Should the app prompt the user to confirm a force push? */
   readonly askForConfirmationOnForcePush: boolean
+
+  /** Should the app prompt the user to confirm an undo commit? */
+  readonly askForConfirmationOnUndoCommit: boolean
+
+  /** Should the app prompt the user to confirm they want to commit with changes are hidden by filter? */
+  readonly askForConfirmationOnCommitFilteredChanges: boolean
+
+  /** Should the app prompt the user to confirm commit message override? */
+  readonly askForConfirmationOnCommitMessageOverride: boolean
+
+  /** Should the app prompt the user to confirm worktree removal? */
+  readonly askForConfirmationOnWorktreeRemoval: boolean
 
   /** How the app should handle uncommitted changes when switching branches */
   readonly uncommittedChangesStrategy: UncommittedChangesStrategy
@@ -200,6 +271,9 @@ export interface IAppState {
 
   /** Whether or not the app should use Windows' OpenSSH client */
   readonly useWindowsOpenSSH: boolean
+
+  /** Whether or not the app should show the commit length warning */
+  readonly showCommitLengthWarning: boolean
 
   /** The current setting for whether the user has disable usage reports */
   readonly optOutOfUsageTracking: boolean
@@ -222,6 +296,9 @@ export interface IAppState {
   /** Whether we should hide white space changes in history diff */
   readonly hideWhitespaceInHistoryDiff: boolean
 
+  /** Whether we should hide white space changes in the pull request diff */
+  readonly hideWhitespaceInPullRequestDiff: boolean
+
   /** Whether we should show side by side diffs */
   readonly showSideBySideDiff: boolean
 
@@ -240,11 +317,14 @@ export interface IAppState {
   /** The selected appearance (aka theme) preference */
   readonly selectedTheme: ApplicationTheme
 
-  /** The custom theme  */
-  readonly customTheme?: ICustomTheme
-
   /** The currently applied appearance (aka theme) */
   readonly currentTheme: ApplicableTheme
+
+  /** The selected tab size preference */
+  readonly selectedTabSize: number
+
+  /** Whether to show the worktree dropdown even without linked worktrees. */
+  readonly alwaysShowWorktreeList: boolean
 
   /**
    * A map keyed on a user account (GitHub.com or GitHub Enterprise)
@@ -280,15 +360,25 @@ export interface IAppState {
   readonly commitSpellcheckEnabled: boolean
 
   /**
-   * List of drag & drop intro types that have been shown to the user.
-   */
-  readonly dragAndDropIntroTypesShown: ReadonlySet<DragAndDropIntroType>
-
-  /**
    * Record of what logged in users have been checked to see if thank you is in
    * order for external contributions in latest release.
    */
   readonly lastThankYou: ILastThankYou | undefined
+
+  /** Whether or not the user wants to use a custom editor. */
+  readonly useCustomEditor: boolean
+
+  /** Info needed to launch a custom editor chosen by the user. */
+  readonly customEditor: ICustomIntegration | null
+
+  /** Whether or not the user wants to use a custom shell. */
+  readonly useCustomShell: boolean
+
+  /** Info needed to launch a custom shell chosen by the user. */
+  readonly customShell: ICustomIntegration | null
+
+  /** User-configured path to the GitHub Copilot app, or null for auto-detection. */
+  readonly copilotAppPath: string | null
 
   /**
    * Whether or not the CI status popover is visible.
@@ -299,6 +389,55 @@ export interface IAppState {
    * Whether or not the user enabled high-signal notifications.
    */
   readonly notificationsEnabled: boolean
+
+  /** The users last chosen pull request suggested next action. */
+  readonly pullRequestSuggestedNextAction:
+    | PullRequestSuggestedNextAction
+    | undefined
+
+  /** Whether or not the user will see check marks indicating a line is included in the check in the diff */
+  readonly showDiffCheckMarks: boolean
+
+  /** Whether the user prefers absolute dates over relative time in lists */
+  readonly preferAbsoluteDates: boolean
+
+  /**
+   * Cached repo rulesets. Used to prevent repeatedly querying the same
+   * rulesets to check their bypass status.
+   */
+  readonly cachedRepoRulesets: ReadonlyMap<number, IAPIRepoRuleset>
+
+  readonly underlineLinks: boolean
+
+  readonly updateState: IUpdateState
+
+  readonly commitMessageGenerationDisclaimerLastSeen: number | null
+
+  readonly commitMessageGenerationButtonClicked: boolean
+
+  readonly copilotConflictResolutionDisclaimerLastSeen: number | null
+
+  readonly copilotConflictResolutionClickCount: number
+
+  readonly alwaysUseCopilotForConflictResolution: boolean
+
+  /** Whether the changes filter is shown */
+  readonly showChangesFilter: boolean
+
+  /** Account-scoped Copilot model selections. */
+  readonly selectedCopilotModelsByAccount: CopilotModelSelectionsByAccount
+
+  /** Account-scoped Copilot model lists, keyed by Copilot account cache key. */
+  readonly copilotModelsByAccount: CopilotModelsByAccount
+
+  /** Account-scoped Copilot quota snapshots, keyed by Copilot account cache key. */
+  readonly copilotQuotaSnapshotsByAccount: CopilotQuotaSnapshotsByAccount
+
+  /**
+   * The list of user-configured Copilot model providers (BYOK). Empty when
+   * the user has not configured any custom providers.
+   */
+  readonly byokProviders: ReadonlyArray<IBYOKProvider>
 }
 
 export enum FoldoutType {
@@ -306,6 +445,8 @@ export enum FoldoutType {
   Branch,
   AppMenu,
   AddMenu,
+  PushPull,
+  Worktree,
 }
 
 export type AppMenuFoldout = {
@@ -317,15 +458,6 @@ export type AppMenuFoldout = {
    * keyboard navigation by pressing access keys.
    */
   enableAccessKeyNavigation: boolean
-
-  /**
-   * Whether the menu was opened by pressing Alt (or Alt+X where X is an
-   * access key for one of the top level menu items). This is used as a
-   * one-time signal to the AppMenu to use some special semantics for
-   * selection and focus. Specifically it will ensure that the last opened
-   * menu will receive focus.
-   */
-  openedWithAccessKey?: boolean
 }
 
 export type BranchFoldout = {
@@ -337,6 +469,8 @@ export type Foldout =
   | { type: FoldoutType.AddMenu }
   | BranchFoldout
   | AppMenuFoldout
+  | { type: FoldoutType.PushPull }
+  | { type: FoldoutType.Worktree }
 
 export enum RepositorySectionTab {
   Changes,
@@ -419,6 +553,16 @@ export interface IRepositoryState {
   readonly selectedSection: RepositorySectionTab
 
   /**
+   * The state of the current pull request view in the repository.
+   *
+   * It will be populated when a user initiates a pull request. It may have
+   * content to retain a users pull request state if they navigate
+   * away from the current pull request view and then back. It is returned
+   * to null after a pull request has been opened.
+   */
+  readonly pullRequestState: IPullRequestState | null
+
+  /**
    * The name and email that will be used for the author info
    * when committing barring any race where user.name/user.email is
    * updated between us reading it and a commit being made
@@ -427,6 +571,9 @@ export interface IRepositoryState {
   readonly commitAuthor: CommitIdentity | null
 
   readonly branchesState: IBranchesState
+
+  /** The worktrees associated with this repository. */
+  readonly worktrees: ReadonlyArray<WorktreeEntry>
 
   /** The commits loaded, keyed by their full SHA. */
   readonly commitLookup: Map<string, Commit>
@@ -452,11 +599,20 @@ export interface IRepositoryState {
   /** Is a commit in progress? */
   readonly isCommitting: boolean
 
+  /** Is generating a commit message? */
+  readonly isGeneratingCommitMessage: boolean
+
+  /** Controller used to cancel an in-flight commit message generation. */
+  readonly commitMessageGenerationAbortController: AbortController | null
+
   /** Commit being amended, or null if none. */
   readonly commitToAmend: Commit | null
 
   /** The date the repository was last fetched. */
   readonly lastFetched: Date | null
+
+  readonly hookProgress: HookProgress | null
+  readonly subscribeToCommitOutput: TerminalOutputListener | null
 
   /**
    * If we're currently working on switching to a new branch this
@@ -491,7 +647,31 @@ export interface IRepositoryState {
   /** State associated with a multi commit operation such as rebase,
    * cherry-pick, squash, reorder... */
   readonly multiCommitOperationState: IMultiCommitOperationState | null
+
+  /**
+   * Whether or not to skip blocking commit hooks when creating commits
+   * by means of passing the `--no-verify` flag to git commit
+   */
+  readonly skipCommitHooks: boolean
+
+  /**
+   * Whether or not to add a `Signed-off-by` trailer to commit messages
+   * by means of passing the `--signoff` flag to git commit
+   */
+  readonly signOffCommits: boolean
+
+  /**
+   * Whether or not to allow creating a commit without any file changes
+   * by means of passing the `--allow-empty` flag to git commit.
+   * This option resets to false after each commit.
+   */
+  readonly allowEmptyCommit: boolean
 }
+
+export type CommitOptions = Pick<
+  IRepositoryState,
+  'skipCommitHooks' | 'signOffCommits' | 'allowEmptyCommit'
+>
 
 export interface IBranchesState {
   /**
@@ -511,6 +691,13 @@ export interface IBranchesState {
    * GitHub.com users are able to change their default branch in the web UI.
    */
   readonly defaultBranch: Branch | null
+
+  /**
+   * The default branch of the upstream remote in a forked GitHub repository
+   * with the ForkContributionTarget.Parent behavior, or null if it cannot be
+   * inferred or is another kind of repository.
+   */
+  readonly upstreamDefaultBranch: Branch | null
 
   /**
    * A list of all branches (remote and local) that's currently in
@@ -552,6 +739,39 @@ export interface IBranchesState {
 export interface ICommitSelection {
   /** The commits currently selected in the app */
   readonly shas: ReadonlyArray<string>
+
+  /**
+   * When multiple commits are selected, the diff is created using the rev range
+   * of firstSha^..lastSha in the selected shas. Thus comparing the trees of the
+   * the lastSha and the first parent of the first sha. However, our history
+   * list shows commits in chronological order. Thus, when a branch is merged,
+   * the commits from that branch are injected in their chronological order into
+   * the history list. Therefore, given a branch history of A, B, C, D,
+   * MergeCommit where B and C are from the merged branch, diffing on the
+   * selection of A through D would not have the changes from B an C.
+   *
+   * This is a list of the shas that are reachable by following the parent links
+   * (aka the graph) from the lastSha to the firstSha^ in the selection.
+   *
+   * Other notes: Given a selection A through D, executing `git diff A..D` would
+   * give us the changes since A but not including A; since the user will have
+   * selected A, we do `git diff A^..D` so that we include the changes of A.
+   * */
+  readonly shasInDiff: ReadonlyArray<string>
+
+  /**
+   * Whether the a selection of commits are group of adjacent to each other.
+   * Example: Given these are indexes of sha's in history, 3, 4, 5, 6 is contiguous as
+   * opposed to 3, 5, 8.
+   *
+   * Technically order does not matter, but shas are stored in order.
+   *
+   * Contiguous selections can be diffed. Non-contiguous selections can be
+   * cherry-picked, reordered, or squashed.
+   *
+   * Assumed that a selections of zero or one commit are contiguous.
+   * */
+  readonly isContiguous: boolean
 
   /** The changeset data associated with the selected commit */
   readonly changesetData: IChangesetData
@@ -612,7 +832,7 @@ export interface IChangesState {
    * Co-Authored-By commit message trailers depending on whether
    * the user has chosen to do so.
    */
-  readonly coAuthors: ReadonlyArray<IAuthor>
+  readonly coAuthors: ReadonlyArray<Author>
 
   /**
    * Stores information about conflicts in the working directory
@@ -637,6 +857,37 @@ export interface IChangesState {
 
   /** `true` if the GitHub API reports that the branch is protected */
   readonly currentBranchProtected: boolean
+
+  /**
+   * Repo rules that apply to the current branch.
+   */
+  readonly currentRepoRulesInfo: RepoRulesInfo
+
+  /** The file list filter state containing all filter options */
+  readonly fileListFilter: IFileListFilterState
+}
+
+/**
+ * State interface for file list filtering options
+ */
+export interface IFileListFilterState {
+  /** The text entered into the filter text box */
+  readonly filterText: string
+
+  /** Whether to filter and show only included in commit files */
+  readonly isIncludedInCommit: boolean
+
+  /** Whether to filter and show only excluded from commit files */
+  readonly isExcludedFromCommit: boolean
+
+  /** Whether to filter and show only new files */
+  readonly isNewFile: boolean
+
+  /** Whether to filter and show only modified files */
+  readonly isModifiedFile: boolean
+
+  /** Whether to filter and show only deleted files */
+  readonly isDeletedFile: boolean
 }
 
 /**
@@ -702,6 +953,9 @@ export interface ICompareState {
 
   /** The SHAs of commits to render in the compare list */
   readonly commitSHAs: ReadonlyArray<string>
+
+  /** The SHAs of commits to highlight in the compare list */
+  readonly shasToHighlight: ReadonlyArray<string>
 
   /**
    * A list of branches (remote and local) except the current branch, and
@@ -821,6 +1075,57 @@ export interface IMultiCommitOperationState {
   readonly userHasResolvedConflicts: boolean
 
   /**
+   * Whether the user has opted into Copilot-powered conflict resolution for
+   * this operation. When true, subsequent conflict rounds will automatically
+   * route through ShowCopilotConflictsLoading instead of ShowConflicts.
+   */
+  readonly useCopilotConflictResolution: boolean
+
+  /**
+   * Resolutions returned by Copilot for the current conflict round. Null when
+   * Copilot hasn't been invoked or has not yet completed. Set after a
+   * successful resolution so the result dialog can display per-file reasoning.
+   */
+  readonly copilotResolutions: ReadonlyArray<IFileResolution> | null
+
+  /**
+   * Conflicted files Copilot did not resolve, with the reason each was skipped
+   * (too large, unreadable, no parseable markers, etc.). Null when Copilot
+   * hasn't been invoked or hasn't yet completed. Surfaced in the result dialog
+   * so the user can resolve these manually before continuing.
+   */
+  readonly copilotSkippedFiles: ReadonlyArray<ICopilotSkippedFile> | null
+
+  /**
+   * Progress of the in-flight Copilot conflict resolution request. Null when
+   * no resolution is in progress.
+   */
+  readonly copilotResolutionProgress: IConflictResolutionProgress | null
+
+  /**
+   * Bundled context for rendering the Copilot resolution summary card —
+   * the markdown produced by the model plus the real metadata Desktop uses
+   * to render the branch-flow header and the "For more context" links.
+   * Null when Copilot hasn't been invoked or has not yet completed.
+   */
+  readonly copilotResolutionSummary: ICopilotResolutionSummary | null
+
+  /**
+   * Controller used to cancel the in-flight Copilot conflict resolution. Set
+   * while a resolution is running so the loading dialog's "Stop" button can
+   * actually tear down the underlying SDK turn (rather than just navigating the
+   * UI away). Null when no resolution is in progress.
+   */
+  readonly copilotResolutionAbortController: AbortController | null
+
+  /**
+   * The model display captured at the time Copilot conflict resolution was
+   * started. Shown in the result dialog header so that changing the model
+   * setting mid-operation doesn't confuse the user.
+   */
+  readonly copilotResolutionModel: IConflictResolutionModelDisplay | null
+
+  /**
    * The commit id of the tip of the branch user is modifying in the operation.
    *
    * Uses:
@@ -884,4 +1189,32 @@ export interface IConstrainedValue {
   readonly value: number
   readonly max: number
   readonly min: number
+}
+
+/**
+ * The state of the current pull request view in the repository.
+ */
+export interface IPullRequestState {
+  /**
+   * The base branch of a a pull request - the branch the currently checked out
+   * branch would merge into
+   */
+  readonly baseBranch: Branch | null
+
+  /** The SHAs of commits of the pull request */
+  readonly commitSHAs: ReadonlyArray<string> | null
+
+  /**
+   * The commit selection, file selection and diff of the pull request.
+   *
+   * Note: By default the commit selection shas will be all the pull request
+   * shas and will mean the diff represents the merge base of the current branch
+   * and the the pull request base branch. This is different than the
+   * repositories commit selection where the diff of all commits represents the
+   * diff between the latest commit and the earliest commits parent.
+   */
+  readonly commitSelection: ICommitSelection | null
+
+  /** The result of merging the pull request branch into the base branch */
+  readonly mergeStatus: MergeTreeResult | null
 }

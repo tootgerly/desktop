@@ -1,7 +1,25 @@
+import escapeRegExp from 'lodash/escapeRegExp'
 import { GitHubRepository } from '../../models/github-repository'
 import { getHTMLURL } from '../api'
-import { escapeRegExp } from '../helpers/regex'
 import { INodeFilter } from './node-filter'
+import { isElement } from './is-element'
+
+/** Return a regexp that matches a full issue, pull request, or discussion url
+ * including the anchor */
+export function issueUrl(repository: GitHubRepository): RegExp {
+  const gitHubURL = getHTMLURL(repository.endpoint)
+  return new RegExp(
+    escapeRegExp(gitHubURL) +
+      '/' +
+      /** A regexp that searches for the owner/name pattern in issue href */
+      /(?<nameWithOwner>\w+(?:-\w+)*\/[.\w-]+)/.source +
+      '/' +
+      /(?:issues|pull|discussions)/.source +
+      '/' +
+      /** A regexp that searches for the number and #anchor of an issue reference */
+      /(?<refNumber>\d+)(?<anchor>#[\w-]+)?\b/.source
+  )
+}
 
 /**
  * The Issue Link filter matches the target and text of an anchor element that
@@ -20,34 +38,10 @@ import { INodeFilter } from './node-filter'
  * that has taken raw urls and auto tagged them them as anchor elements.
  */
 export class IssueLinkFilter implements INodeFilter {
-  /** A regexp that searches for the owner/name pattern in issue href */
-  private readonly nameWithOwner = /(?<nameWithOwner>\w+(?:-\w+)*\/[.\w-]+)/
-
-  /** A regexp that searches for the number and #anchor of an issue reference */
-  private readonly numberWithAnchor = /(?<refNumber>\d+)(?<anchor>#[\w-]+)?\b/
-
-  /** A regexp that matches a full issue, pull request, or discussion url
-   * including the anchor */
-  private get issueUrl(): RegExp {
-    const gitHubURL = getHTMLURL(this.repository.endpoint)
-    return new RegExp(
-      escapeRegExp(gitHubURL) +
-        '/' +
-        this.nameWithOwner.source +
-        '/' +
-        /(?:issues|pull|discussions)/.source +
-        '/' +
-        this.numberWithAnchor.source
-    )
-  }
-
-  /** The parent github repository of which the content the filter is being
-   * applied to belongs  */
-  private readonly repository: GitHubRepository
-
-  public constructor(repository: GitHubRepository) {
-    this.repository = repository
-  }
+  public constructor(
+    /** The repository which the markdown content originated from */
+    private readonly repository: GitHubRepository
+  ) {}
 
   /**
    * Issue link mention filter iterates on all anchor elements that are not
@@ -63,15 +57,13 @@ export class IssueLinkFilter implements INodeFilter {
    * - https://github.com/github/github/discussions/99872#discussioncomment-1858985
    */
   public createFilterTreeWalker(doc: Document): TreeWalker {
-    // eslint-disable-next-line @typescript-eslint/no-this-alias
-    const filter = this
-    return doc.createTreeWalker(doc, NodeFilter.SHOW_ELEMENT, {
-      acceptNode: function (el: Element) {
+    return doc.createTreeWalker(doc.body, NodeFilter.SHOW_ELEMENT, {
+      acceptNode: (el: Element) => {
         return (el.parentNode !== null &&
           ['CODE', 'PRE', 'A'].includes(el.parentNode.nodeName)) ||
-          !(el instanceof HTMLAnchorElement) ||
+          !isElement(el, 'a') ||
           el.href !== el.innerText ||
-          !filter.isGitHubIssuePullDiscussionLink(el)
+          !this.isGitHubIssuePullDiscussionLink(el)
           ? NodeFilter.FILTER_SKIP
           : NodeFilter.FILTER_ACCEPT
       },
@@ -100,7 +92,7 @@ export class IssueLinkFilter implements INodeFilter {
       return false
     }
 
-    return this.issueUrl.test(anchor.href)
+    return issueUrl(this.repository).test(anchor.href)
   }
 
   /**
@@ -114,11 +106,11 @@ export class IssueLinkFilter implements INodeFilter {
    */
   public async filter(node: Node): Promise<ReadonlyArray<Node> | null> {
     const { textContent: text } = node
-    if (!(node instanceof HTMLAnchorElement) || text === null) {
+    if (!isElement(node, 'a') || text === null) {
       return null
     }
 
-    const match = text.match(this.issueUrl)
+    const match = text.match(issueUrl(this.repository))
     if (match === null || match.groups === undefined) {
       return null
     }

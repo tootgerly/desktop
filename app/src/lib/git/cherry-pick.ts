@@ -1,12 +1,15 @@
-import * as Path from 'path'
-import * as FSE from 'fs-extra'
 import { GitError } from 'dugite'
 import { Repository } from '../../models/repository'
 import {
   AppFileStatusKind,
   WorkingDirectoryFileChange,
 } from '../../models/status'
-import { git, IGitExecutionOptions, IGitResult } from './core'
+import {
+  git,
+  IGitExecutionOptions,
+  IGitResult,
+  IGitStringExecutionOptions,
+} from './core'
 import { getStatus } from './status'
 import { stageFiles } from './update-index'
 import { getCommitsInRange, revRange } from './rev-list'
@@ -20,6 +23,9 @@ import { ManualConflictResolution } from '../../models/manual-conflict-resolutio
 import { stageManualConflictResolution } from './stage'
 import { getCommit } from '.'
 import { IMultiCommitOperationProgress } from '../../models/progress'
+import { join } from 'path'
+import { readFile } from 'fs/promises'
+import { pathExists } from '../path-exists'
 
 /** The app-specific results from attempting to cherry pick commits*/
 export enum CherryPickResult {
@@ -100,8 +106,8 @@ class GitCherryPickParser {
  * @param progressCallback - the callback method that accepts an
  * `ICherryPickProgress` instance created by the parser
  */
-function configureOptionsWithCallBack(
-  baseOptions: IGitExecutionOptions,
+function configureOptionsWithCallBack<T extends IGitExecutionOptions>(
+  baseOptions: T,
   commits: readonly CommitOneLine[],
   progressCallback: (progress: IMultiCommitOperationProgress) => void,
   cherryPickedCount: number = 0
@@ -141,7 +147,7 @@ export async function cherryPick(
     return CherryPickResult.UnableToStart
   }
 
-  let baseOptions: IGitExecutionOptions = {
+  let baseOptions: IGitStringExecutionOptions = {
     expectedErrors: new Set([
       GitError.MergeConflicts,
       GitError.ConflictModifyDeletedInBranch,
@@ -156,7 +162,7 @@ export async function cherryPick(
     )
   }
 
-  // --keep-redundant-commits follows pattern of making sure someone cherry
+  // --empty=keep follows pattern of making sure someone cherry
   //  picked commit summaries appear in target branch history even tho they may
   //  be empty. This flag also results in the ability to cherry pick empty
   //  commits (thus, --allow-empty is not required.)
@@ -166,12 +172,7 @@ export async function cherryPick(
   //  there could be multiple empty commits. I.E. If user does a range that
   //  includes commits from that merge.
   const result = await git(
-    [
-      'cherry-pick',
-      ...commits.map(c => c.sha),
-      '--keep-redundant-commits',
-      '-m 1',
-    ],
+    ['cherry-pick', ...commits.map(c => c.sha), '--empty=keep', '-m 1'],
     repository.path,
     'cherry-pick',
     baseOptions
@@ -239,8 +240,8 @@ export async function getCherryPickSnapshot(
   // or aborted at the same time.
   try {
     abortSafetySha = (
-      await FSE.readFile(
-        Path.join(repository.path, '.git', 'sequencer', 'abort-safety'),
+      await readFile(
+        join(repository.resolvedGitDir, 'sequencer', 'abort-safety'),
         'utf8'
       )
     ).trim()
@@ -252,8 +253,8 @@ export async function getCherryPickSnapshot(
     }
 
     headSha = (
-      await FSE.readFile(
-        Path.join(repository.path, '.git', 'sequencer', 'head'),
+      await readFile(
+        join(repository.resolvedGitDir, 'sequencer', 'head'),
         'utf8'
       )
     ).trim()
@@ -265,8 +266,8 @@ export async function getCherryPickSnapshot(
     }
 
     const remainingPicks = (
-      await FSE.readFile(
-        Path.join(repository.path, '.git', 'sequencer', 'todo'),
+      await readFile(
+        join(repository.resolvedGitDir, 'sequencer', 'todo'),
         'utf8'
       )
     ).trim()
@@ -306,8 +307,8 @@ export async function getCherryPickSnapshot(
     // If cherry-pick is in progress, then there was only one commit cherry-picked
     // thus sequencer files were not used.
     const cherryPickHeadSha = (
-      await FSE.readFile(
-        Path.join(repository.path, '.git', 'CHERRY_PICK_HEAD'),
+      await readFile(
+        join(repository.resolvedGitDir, 'CHERRY_PICK_HEAD'),
         'utf8'
       )
     ).trim()
@@ -400,7 +401,7 @@ export async function continueCherryPick(
   const otherFiles = trackedFiles.filter(f => !manualResolutions.has(f.path))
   await stageFiles(repository, otherFiles)
 
-  const status = await getStatus(repository)
+  const status = await getStatus(repository, false)
   if (status == null) {
     log.warn(
       `[continueCherryPick] unable to get status after staging changes,
@@ -414,7 +415,7 @@ export async function continueCherryPick(
     return CherryPickResult.UnableToStart
   }
 
-  let options: IGitExecutionOptions = {
+  let options: IGitStringExecutionOptions = {
     expectedErrors: new Set([
       GitError.MergeConflicts,
       GitError.ConflictModifyDeletedInBranch,
@@ -464,12 +465,8 @@ export async function continueCherryPick(
     return parseCherryPickResult(result)
   }
 
-  // --keep-redundant-commits follows pattern of making sure someone cherry
-  //  picked commit summaries appear in target branch history even tho they may
-  //  be empty. This flag also results in the ability to cherry pick empty
-  //  commits (thus, --allow-empty is not required.)
   const result = await git(
-    ['cherry-pick', '--continue', '--keep-redundant-commits'],
+    ['cherry-pick', '--continue'],
     repository.path,
     'continueCherryPick',
     options
@@ -490,12 +487,7 @@ export async function isCherryPickHeadFound(
   repository: Repository
 ): Promise<boolean> {
   try {
-    const cherryPickHeadPath = Path.join(
-      repository.path,
-      '.git',
-      'CHERRY_PICK_HEAD'
-    )
-    return FSE.pathExists(cherryPickHeadPath)
+    return pathExists(join(repository.resolvedGitDir, 'CHERRY_PICK_HEAD'))
   } catch (err) {
     log.warn(
       `[cherryPick] a problem was encountered reading .git/CHERRY_PICK_HEAD,

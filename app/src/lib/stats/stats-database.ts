@@ -35,6 +35,9 @@ export interface IDailyMeasures {
   /** The number of times the user has opened a shell from the app. */
   readonly openShellCount: number
 
+  /** The number of times the user invoked the GitHub Copilot app handoff. */
+  readonly openInCopilotAppCount: number
+
   /** The number of partial commits. */
   readonly partialCommits: number
 
@@ -122,7 +125,7 @@ export interface IDailyMeasures {
    */
   readonly enterpriseCommits: number
 
-  /** The number of times the user made a commit to a repo hosted on Github.com */
+  /** The number of times the user made a commit to a repo hosted on GitHub.com */
   readonly dotcomCommits: number
 
   /** The number of times the user made a commit to a protected GitHub or GitHub Enterprise repository */
@@ -146,8 +149,15 @@ export interface IDailyMeasures {
   /** The number of times the user committed a conflicted merge outside the merge conflicts dialog */
   readonly unguidedConflictedMergeCompletionCount: number
 
-  /** The number of times the user is taken to the create pull request page on dotcom */
+  /** The number of times the user is taken to the create pull request page on dotcom including.
+   *
+   * NB - This metric tracks all times including when
+   * `createPullRequestFromPreviewCount` this is tracked.
+   * */
   readonly createPullRequestCount: number
+
+  /** The number of times the user is taken to the create pull request page on dotcom from the preview dialog */
+  readonly createPullRequestFromPreviewCount: number
 
   /** The number of times the rebase conflicts dialog is dismissed */
   readonly rebaseConflictsDialogDismissalCount: number
@@ -163,6 +173,9 @@ export interface IDailyMeasures {
 
   /** The number of times a successful rebase without conflicts is detected */
   readonly rebaseSuccessWithoutConflictsCount: number
+
+  /** The number of times a rebase finishes without effect because the branch was already up-to-date */
+  readonly rebaseWithBranchAlreadyUpToDateCount: number
 
   /** The number of times a user performed a pull with `pull.rebase` in config set to `true` */
   readonly pullWithRebaseCount: number
@@ -463,11 +476,252 @@ export interface IDailyMeasures {
 
   /** The number of times the user reruns checks */
   readonly rerunsChecks: number
+
+  /** The number of "checks failed" notifications the user received */
+  readonly checksFailedNotificationCount: number
+
+  /**
+   * The number of "checks failed" notifications the user received for a recent
+   * repository other than the selected one.
+   */
+  readonly checksFailedNotificationFromRecentRepoCount: number
+
+  /**
+   * The number of "checks failed" notifications the user received for a
+   * non-recent repository other than the selected one.
+   */
+  readonly checksFailedNotificationFromNonRecentRepoCount: number
+
+  /** The number of "checks failed" notifications the user clicked */
+  readonly checksFailedNotificationClicked: number
+
+  /** The number of times the "checks failed" dialog was opened */
+  readonly checksFailedDialogOpenCount: number
+
+  /**
+   * The number of times the user decided to switch to the affected pull request
+   * from the "checks failed" dialog.
+   */
+  readonly checksFailedDialogSwitchToPullRequestCount: number
+
+  /**
+   * The number of times the user decided to re-run the checks from the "checks
+   * failed" dialog.
+   */
+  readonly checksFailedDialogRerunChecksCount: number
+
+  /**
+   * The number of PR review notifications the user received for a recent
+   * repository other than the selected one.
+   */
+  readonly pullRequestReviewNotificationFromRecentRepoCount: number
+
+  /**
+   * The number of PR review notifications the user received for a non-recent
+   * repository other than the selected one.
+   */
+  readonly pullRequestReviewNotificationFromNonRecentRepoCount: number
+
+  /** The number of "approved PR" notifications the user received */
+  readonly pullRequestReviewApprovedNotificationCount: number
+
+  /** The number of "approved PR" notifications the user clicked */
+  readonly pullRequestReviewApprovedNotificationClicked: number
+
+  /**
+   * The number of times the user decided to switch to the affected pull request
+   * from the "approved PR" dialog.
+   */
+  readonly pullRequestReviewApprovedDialogSwitchToPullRequestCount: number
+
+  /** The number of "commented PR" notifications the user received */
+  readonly pullRequestReviewCommentedNotificationCount: number
+
+  /** The number of "commented PR" notifications the user clicked */
+  readonly pullRequestReviewCommentedNotificationClicked: number
+
+  /**
+   * The number of times the user decided to switch to the affected pull request
+   * from the "commented PR" dialog.
+   */
+  readonly pullRequestReviewCommentedDialogSwitchToPullRequestCount: number
+
+  /** The number of "changes requested" notifications the user received */
+  readonly pullRequestReviewChangesRequestedNotificationCount: number
+
+  /** The number of "changes requested" notifications the user clicked */
+  readonly pullRequestReviewChangesRequestedNotificationClicked: number
+
+  /**
+   * The number of times the user decided to switch to the affected pull request
+   * from the "changes requested" dialog.
+   */
+  readonly pullRequestReviewChangesRequestedDialogSwitchToPullRequestCount: number
+
+  /** The number of "commented PR" notifications the user received */
+  readonly pullRequestCommentNotificationCount: number
+
+  /** The number of "commented PR" notifications the user clicked */
+  readonly pullRequestCommentNotificationClicked: number
+
+  /**
+   * The number of PR comment notifications the user received for a non-recent
+   * repository other than the selected one.
+   */
+  readonly pullRequestCommentNotificationFromNonRecentRepoCount: number
+  /**
+   * The number of PR comment notifications the user received for a recent
+   * repository other than the selected one.
+   */
+  readonly pullRequestCommentNotificationFromRecentRepoCount: number
+
+  /**
+   * The number of times the user decided to switch to the affected pull request
+   * from the PR comment dialog.
+   */
+  readonly pullRequestCommentDialogSwitchToPullRequestCount: number
+
+  /** The number of times the user did a multi commit diff where there were unreachable commits */
+  readonly multiCommitDiffWithUnreachableCommitWarningCount: number
+
+  /** The number of times the user does a multi commit diff from the history view */
+  readonly multiCommitDiffFromHistoryCount: number
+
+  /** The number of times the user does a multi commit diff from the compare */
+  readonly multiCommitDiffFromCompareCount: number
+
+  /** The number of times the user opens the unreachable commits dialog */
+  readonly multiCommitDiffUnreachableCommitsDialogOpenedCount: number
+
+  /** The number of times the user opens a submodule diff from the changes list */
+  readonly submoduleDiffViewedFromChangesListCount: number
+
+  /** The number of times the user opens a submodule diff from the History view */
+  readonly submoduleDiffViewedFromHistoryCount: number
+
+  /** The number of times the user opens a submodule repository from its diff */
+  readonly openSubmoduleFromDiffCount: number
+
+  /** The number of times a user has opened the preview pull request dialog */
+  readonly previewedPullRequestCount: number
+  /** The number of times a user initiates (from an empty state) typing in the changes filter bar */
+  typedInChangesFilterCount: 0
+
+  /** The number of times the user applies the "Included in Commit" Filter */
+  appliesIncludedInCommitFilterCount: 0
+
+  /** The number of times the user applies the "Excluded from Commit" Filter */
+  appliesExcludedFromCommitFilterCount: 0
+
+  /** The number of times the user applies the "New Files" Changes Filter */
+  appliesNewFilesChangesFilterCount: 0
+
+  /** The number of times the user applies the "Modified Files" Changes Filter */
+  appliesModifiedFilesChangesFilterCount: 0
+
+  /** The number of times the user applies the "Deleted Files" Changes Filter */
+  appliesDeletedFilesChangesFilterCount: 0
+
+  /** The number of times the user clears all filters */
+  appliesClearAllChangesListFilterCount: 0
+
+  /** The number of times the user adjust the filter from warnings about hidden changes */
+  adjustedFiltersForHiddenChangesCount: 0
+
+  /** The number of enterprise accounts the user is signed in to */
+  readonly enterpriseAccountCount: number
+
+  /** The number of times a user has clicked the "Generate commit message" button */
+  readonly generateCommitMessageButtonClickCount: number
+
+  /** The number of times a user got a commit message generated by Copilot */
+  readonly generateCommitMessageCount: number
+
+  /** The number of times a user used the verbatim commit message generated by Copilot */
+  readonly generateCommitMessageUsedVerbatimCount: number
+
+  /** The number of times a push was blocked by secret scanning */
+  readonly pushBlockedBySecretScanningCount: number
+
+  /** The number of times a secret is detected on push */
+  readonly secretsDetectedOnPushCount: number
+
+  /** The number of secrets detected on push that were bypassed */
+  readonly secretsDetectedOnPushBypassedCount: number
+
+  /** The number of times the user bypassed a secret with the reason of "False Positive" */
+  readonly secretsDetectedOnPushBypassedAsFalsePositiveCount: number
+
+  /** The number of times the user bypassed a secret with the reason of "Used in Test" */
+  readonly secretsDetectedOnPushBypassedAsUsedInTestCount: number
+
+  /** The number of times the user bypassed a secret with the reason of "Will Fix Later" */
+  readonly secretsDetectedOnPushBypassedAsWillFixLaterCount: number
+
+  /** The number of secrets detected on push where the delegated bypass link was clicked  */
+  readonly secretsDetectedOnPushDelegatedBypassLinkClickedCount: number
+
+  /** The number of times the user clicked on the secret remediation instructions link */
+  readonly secretRemediationInstructionsLinkClickedCount: number
+
+  /** The number of times the user switched between worktrees */
+  readonly worktreeSwitchCount: number
+
+  /** The number of times the user created a new worktree */
+  readonly worktreeCreatedCount: number
+
+  /** The number of times the user deleted a worktree */
+  readonly worktreeDeletedCount: number
+
+  /**
+   * The maximum number of worktrees seen in any single repository during the
+   * reporting period.
+   */
+  readonly worktreeMaxCount: number
+
+  /** The number of times the user initiated Copilot conflict resolution */
+  readonly initiateResolveConflictsWithCopilotCount: number
+
+  /** The number of times the user accepted Copilot conflict resolution suggestions */
+  readonly copilotConflictResolutionAcceptedCount: number
+
+  /** The number of accepted resolutions where the user overrode at least one file */
+  readonly copilotConflictResolutionWithOverridesCount: number
+
+  /** The number of times the user switched to manual resolution after seeing Copilot suggestions */
+  readonly copilotConflictResolutionSwitchToManualCount: number
+
+  /** The number of times the user stopped Copilot conflict resolution while loading */
+  readonly copilotConflictResolutionStoppedCount: number
+
+  /** The number of times the conflict state disappeared after Copilot resolution was initiated */
+  readonly copilotConflictResolutionNoConflictStateCount: number
+
+  /** The number of times all conflicted files disappeared after Copilot resolution was initiated */
+  readonly copilotConflictResolutionNoConflictedFilesCount: number
+
+  /** The number of times every conflicted file was skipped by Copilot resolution */
+  readonly copilotConflictResolutionAllFilesSkippedCount: number
+
+  /** The number of times Copilot conflict resolution failed with an error */
+  readonly copilotConflictResolutionErrorCount: number
+
+  /** The number of Copilot conflict resolutions that took over 15 seconds */
+  readonly copilotConflictResolutionOver15sCount: number
+
+  /** The number of Copilot conflict resolutions that took over 30 seconds */
+  readonly copilotConflictResolutionOver30sCount: number
+
+  /** The number of Copilot conflict resolutions that took over 60 seconds */
+  readonly copilotConflictResolutionOver60sCount: number
+
+  /** The number of Copilot conflict resolutions that took over 120 seconds */
+  readonly copilotConflictResolutionOver120sCount: number
 }
 
 export class StatsDatabase extends Dexie {
-  public launches!: Dexie.Table<ILaunchStats, number>
-  public dailyMeasures!: Dexie.Table<IDailyMeasures, number>
+  public declare launches: Dexie.Table<ILaunchStats, number>
+  public declare dailyMeasures: Dexie.Table<IDailyMeasures, number>
 
   public constructor(name: string) {
     super(name)

@@ -1,3 +1,5 @@
+import { describe, it } from 'node:test'
+import assert from 'node:assert'
 import {
   endpointSatisfies,
   VersionConstraint,
@@ -9,27 +11,18 @@ import { forceUnwrap } from '../../src/lib/fatal-error'
 describe('endpoint-capabilities', () => {
   describe('endpointSatisfies', () => {
     it('recognizes github.com', () => {
-      expect(testDotCom(true)).toBeTrue()
-      expect(testDotCom(false)).toBeFalse()
+      assert.equal(testDotCom(true), true)
+      assert.equal(testDotCom(false), false)
     })
 
     it('recognizes GHES', () => {
-      expect(testGHES(false)).toBeFalse()
-      expect(testGHES(true)).toBeTrue()
+      assert.equal(testGHES(false), false)
+      assert.equal(testGHES(true), true)
     })
 
     it('recognizes GHAE', () => {
-      expect(testGHAE(false)).toBeFalse()
-      expect(testGHAE(true)).toBeTrue()
-    })
-
-    // GHAE doesn't advertise the installed version so we'll assume its
-    // capabilities match that of a recent supported version of GHES. This is
-    // defined in the `assumedGHAEVersion` constant in endpoint-capabilities.ts
-    // and needs to be updated periodically.
-    it('assumes GHAE versions', () => {
-      expect(testGHAE('>= 3.2.1')).toBeFalse()
-      expect(testGHAE('>= 3.2.0')).toBeTrue()
+      assert.equal(testGHEDotCom(false), false)
+      assert.equal(testGHEDotCom(true), true)
     })
 
     // If we can't determine the actual version of a GitHub Enterprise Server
@@ -37,36 +30,38 @@ describe('endpoint-capabilities', () => {
     // of GHES. This is defined in the `assumedGHESVersion` constant in
     // endpoint-capabilities.ts and needs to be updated periodically.
     it('assumes GHES versions', () => {
-      expect(testGHES('>= 3.1.1')).toBeFalse()
-      expect(testGHES('>= 3.1.0')).toBeTrue()
+      assert.equal(testGHES('>= 3.1.1'), false)
+      assert.equal(testGHES('>= 3.1.0'), true)
     })
 
     it('parses semver ranges', () => {
-      expect(testGHES('>= 1', '1.0.0')).toBeTrue()
-      expect(testGHES('> 1.0.0', '1.0.0')).toBeFalse()
-      expect(testGHES('> 0.9.9', '1.0.0')).toBeTrue()
+      assert.equal(testGHES('>= 1', '1.0.0'), true)
+      assert.equal(testGHES('> 1.0.0', '1.0.0'), false)
+      assert.equal(testGHES('> 0.9.9', '1.0.0'), true)
     })
 
     it('deals with common cases (smoketest)', () => {
-      expect(
+      assert.equal(
         testEndpoint('https://api.github.com', {
           dotcom: true,
-          ae: '>= 3.0.0',
+          ghe: false,
           es: '>= 3.0.0',
-        })
-      ).toBeTrue()
+        }),
+        true
+      )
 
-      expect(
+      assert.equal(
         testEndpoint(
           'https://ghe.io',
           {
             dotcom: false,
-            ae: '>= 4.0.0',
+            ghe: false,
             es: '>= 3.1.0',
           },
           '3.1.0'
-        )
-      ).toBeTrue()
+        ),
+        true
+      )
     })
   })
 })
@@ -77,7 +72,7 @@ function testDotCom(
 ) {
   return testEndpoint(
     getDotComAPIEndpoint(),
-    { dotcom: constraint, ae: false, es: false },
+    { dotcom: constraint, ghe: false, es: false },
     endpointVersion
   )
 }
@@ -88,20 +83,17 @@ function testGHES(
 ) {
   return testEndpoint(
     'https://ghe.io',
-    { dotcom: false, ae: false, es: constraint },
+    { dotcom: false, ghe: false, es: constraint },
     endpointVersion
   )
 }
 
-function testGHAE(
-  constraint: boolean | string,
-  endpointVersion: string | SemVer | null = null
-) {
-  return testEndpoint(
-    'https://corp.ghe.com',
-    { dotcom: false, ae: constraint, es: false },
-    endpointVersion
-  )
+function testGHEDotCom(constraint: boolean) {
+  return testEndpoint('https://corp.ghe.com', {
+    dotcom: false,
+    ghe: constraint,
+    es: false,
+  })
 }
 
 function testEndpoint(

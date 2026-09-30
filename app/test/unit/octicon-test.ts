@@ -1,5 +1,7 @@
+import { describe, it } from 'node:test'
+import assert from 'node:assert'
 import { iconForRepository } from '../../src/ui/octicons'
-import * as OcticonSymbol from '../../src/ui/octicons/octicons.generated'
+import * as octicons from '../../src/ui/octicons/octicons.generated'
 import { CloningRepository } from '../../src/models/cloning-repository'
 import { Repository } from '../../src/models/repository'
 import { gitHubRepoFixture } from '../helpers/github-repo-builder'
@@ -11,13 +13,13 @@ describe('octicon/iconForRepository', () => {
       'https://github.com/desktop/desktop'
     )
     const icon = iconForRepository(repository)
-    expect(icon).toEqual(OcticonSymbol.desktopDownload)
+    assert.equal(icon, octicons.desktopDownload)
   })
 
   it('shows computer icon for non-GitHub repository', () => {
     const repository = new Repository('C:/some/path/to/repo', 1, null, false)
     const icon = iconForRepository(repository)
-    expect(icon).toEqual(OcticonSymbol.deviceDesktop)
+    assert.equal(icon, octicons.deviceDesktop)
   })
 
   it('shows repo icon for public GitHub repository', () => {
@@ -33,7 +35,7 @@ describe('octicon/iconForRepository', () => {
       false
     )
     const icon = iconForRepository(repository)
-    expect(icon).toEqual(OcticonSymbol.repo)
+    assert.equal(icon, octicons.repo)
   })
 
   it('shows lock icon for private GitHub repository', () => {
@@ -49,7 +51,7 @@ describe('octicon/iconForRepository', () => {
       false
     )
     const icon = iconForRepository(repository)
-    expect(icon).toEqual(OcticonSymbol.lock)
+    assert.equal(icon, octicons.lock)
   })
 
   it('shows fork icon for forked GitHub repository', () => {
@@ -66,6 +68,6 @@ describe('octicon/iconForRepository', () => {
       false
     )
     const icon = iconForRepository(repository)
-    expect(icon).toEqual(OcticonSymbol.repoForked)
+    assert.equal(icon, octicons.repoForked)
   })
 })

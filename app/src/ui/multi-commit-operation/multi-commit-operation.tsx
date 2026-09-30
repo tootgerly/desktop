@@ -9,9 +9,7 @@ import { CherryPick } from './cherry-pick'
 import { Rebase } from './rebase'
 
 /** A component for managing the views of a multi commit operation. */
-export class MultiCommitOperation extends React.Component<
-  IMultiCommitOperationProps
-> {
+export class MultiCommitOperation extends React.Component<IMultiCommitOperationProps> {
   public render() {
     const { kind } = this.props.state.operationDetail
     switch (kind) {
@@ -31,6 +29,14 @@ export class MultiCommitOperation extends React.Component<
             askForConfirmationOnForcePush={
               this.props.askForConfirmationOnForcePush
             }
+            accounts={this.props.accounts}
+            cachedRepoRulesets={this.props.cachedRepoRulesets}
+            shouldShowCopilotConflictResolutionCallOut={
+              this.props.shouldShowCopilotConflictResolutionCallOut
+            }
+            copilotConflictResolutionModel={
+              this.props.copilotConflictResolutionModel
+            }
             openFileInExternalEditor={this.props.openFileInExternalEditor}
             resolvedExternalEditor={this.props.resolvedExternalEditor}
             openRepositoryInShell={this.props.openRepositoryInShell}
@@ -48,6 +54,14 @@ export class MultiCommitOperation extends React.Component<
             askForConfirmationOnForcePush={
               this.props.askForConfirmationOnForcePush
             }
+            accounts={this.props.accounts}
+            cachedRepoRulesets={this.props.cachedRepoRulesets}
+            shouldShowCopilotConflictResolutionCallOut={
+              this.props.shouldShowCopilotConflictResolutionCallOut
+            }
+            copilotConflictResolutionModel={
+              this.props.copilotConflictResolutionModel
+            }
             openFileInExternalEditor={this.props.openFileInExternalEditor}
             resolvedExternalEditor={this.props.resolvedExternalEditor}
             openRepositoryInShell={this.props.openRepositoryInShell}
@@ -64,6 +78,14 @@ export class MultiCommitOperation extends React.Component<
             workingDirectory={this.props.workingDirectory}
             askForConfirmationOnForcePush={
               this.props.askForConfirmationOnForcePush
+            }
+            accounts={this.props.accounts}
+            cachedRepoRulesets={this.props.cachedRepoRulesets}
+            shouldShowCopilotConflictResolutionCallOut={
+              this.props.shouldShowCopilotConflictResolutionCallOut
+            }
+            copilotConflictResolutionModel={
+              this.props.copilotConflictResolutionModel
             }
             openFileInExternalEditor={this.props.openFileInExternalEditor}
             resolvedExternalEditor={this.props.resolvedExternalEditor}

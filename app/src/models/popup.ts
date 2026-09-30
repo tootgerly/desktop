@@ -14,75 +14,125 @@ import { Commit, CommitOneLine, ICommitContext } from './commit'
 import { IStashEntry } from './stash-entry'
 import { Account } from '../models/account'
 import { Progress } from './progress'
-import { ITextDiff, DiffSelection } from './diff'
+import { ITextDiff, DiffSelection, ImageDiffType } from './diff'
 import { RepositorySettingsTab } from '../ui/repository-settings/repository-settings'
 import { ICommitMessage } from './commit-message'
-import { IAuthor } from './author'
+import { Author, UnknownAuthor } from './author'
 import { IRefCheck } from '../lib/ci-checks/ci-checks'
 import { GitHubRepository } from './github-repository'
+import { ValidNotificationPullRequestReview } from '../lib/valid-notification-pull-request-review'
+import { UnreachableCommitsTab } from '../ui/history/unreachable-commits-dialog'
+import { IAPIComment } from '../lib/api'
+import { ISecretScanResult } from '../ui/secret-scanning/push-protection-error-dialog'
+import { BypassReasonType } from '../ui/secret-scanning/bypass-push-protection-dialog'
+import { TerminalOutput, TerminalOutputListener } from '../lib/git'
+import type { IBYOKModel, IBYOKProvider } from '../lib/copilot/byok'
+import { WorktreeEntry } from './worktree'
 
 export enum PopupType {
-  RenameBranch = 1,
-  DeleteBranch,
-  DeleteRemoteBranch,
-  ConfirmDiscardChanges,
-  Preferences,
-  RepositorySettings,
-  AddRepository,
-  CreateRepository,
-  CloneRepository,
-  CreateBranch,
-  SignIn,
-  About,
-  InstallGit,
-  PublishRepository,
-  Acknowledgements,
-  UntrustedCertificate,
-  RemoveRepository,
-  TermsAndConditions,
-  PushBranchCommits,
-  CLIInstalled,
-  GenericGitAuthentication,
-  ExternalEditorFailed,
-  OpenShellFailed,
-  InitializeLFS,
-  LFSAttributeMismatch,
-  UpstreamAlreadyExists,
-  ReleaseNotes,
-  DeletePullRequest,
-  OversizedFiles,
-  CommitConflictsWarning,
-  PushNeedsPull,
-  ConfirmForcePush,
-  StashAndSwitchBranch,
-  ConfirmOverwriteStash,
-  ConfirmDiscardStash,
-  CreateTutorialRepository,
-  ConfirmExitTutorial,
-  PushRejectedDueToMissingWorkflowScope,
-  SAMLReauthRequired,
-  CreateFork,
-  CreateTag,
-  DeleteTag,
-  LocalChangesOverwritten,
-  ChooseForkSettings,
-  ConfirmDiscardSelection,
-  MoveToApplicationsFolder,
-  ChangeRepositoryAlias,
-  ThankYou,
-  CommitMessage,
-  MultiCommitOperation,
-  WarnLocalChangesBeforeUndo,
-  WarningBeforeReset,
-  InvalidatedToken,
-  AddSSHHost,
-  SSHKeyPassphrase,
-  PullRequestChecksFailed,
-  CICheckRunRerun,
-  WarnForcePush,
+  RenameBranch = 'RenameBranch',
+  DeleteBranch = 'DeleteBranch',
+  DeleteRemoteBranch = 'DeleteRemoteBranch',
+  ConfirmDiscardChanges = 'ConfirmDiscardChanges',
+  Preferences = 'Preferences',
+  RepositorySettings = 'RepositorySettings',
+  AddRepository = 'AddRepository',
+  CreateRepository = 'CreateRepository',
+  CloneRepository = 'CloneRepository',
+  CreateBranch = 'CreateBranch',
+  SignIn = 'SignIn',
+  About = 'About',
+  InstallGit = 'InstallGit',
+  PublishRepository = 'PublishRepository',
+  Acknowledgements = 'Acknowledgements',
+  UntrustedCertificate = 'UntrustedCertificate',
+  RemoveRepository = 'RemoveRepository',
+  TermsAndConditions = 'TermsAndConditions',
+  PushBranchCommits = 'PushBranchCommits',
+  CLIInstalled = 'CLIInstalled',
+  GenericGitAuthentication = 'GenericGitAuthentication',
+  ExternalEditorFailed = 'ExternalEditorFailed',
+  CopilotAppNotFound = 'CopilotAppNotFound',
+  OpenWithExternalEditor = 'OpenWithExternalEditor',
+  OpenShellFailed = 'OpenShellFailed',
+  InitializeLFS = 'InitializeLFS',
+  LFSAttributeMismatch = 'LFSAttributeMismatch',
+  UpstreamAlreadyExists = 'UpstreamAlreadyExists',
+  ReleaseNotes = 'ReleaseNotes',
+  DeletePullRequest = 'DeletePullRequest',
+  OversizedFiles = 'OversizedFiles',
+  CommitConflictsWarning = 'CommitConflictsWarning',
+  PushNeedsPull = 'PushNeedsPull',
+  ConfirmForcePush = 'ConfirmForcePush',
+  StashAndSwitchBranch = 'StashAndSwitchBranch',
+  ConfirmOverwriteStash = 'ConfirmOverwriteStash',
+  ConfirmDiscardStash = 'ConfirmDiscardStash',
+  ConfirmCheckoutCommit = 'ConfirmCheckoutCommit',
+  CreateTutorialRepository = 'CreateTutorialRepository',
+  ConfirmExitTutorial = 'ConfirmExitTutorial',
+  PushRejectedDueToMissingWorkflowScope = 'PushRejectedDueToMissingWorkflowScope',
+  SAMLReauthRequired = 'SAMLReauthRequired',
+  CreateFork = 'CreateFork',
+  CreateTag = 'CreateTag',
+  DeleteTag = 'DeleteTag',
+  LocalChangesOverwritten = 'LocalChangesOverwritten',
+  ChooseForkSettings = 'ChooseForkSettings',
+  ConfirmDiscardSelection = 'ConfirmDiscardSelection',
+  MoveToApplicationsFolder = 'MoveToApplicationsFolder',
+  ChangeRepositoryAlias = 'ChangeRepositoryAlias',
+  ThankYou = 'ThankYou',
+  CommitMessage = 'CommitMessage',
+  MultiCommitOperation = 'MultiCommitOperation',
+  WarnLocalChangesBeforeUndo = 'WarnLocalChangesBeforeUndo',
+  WarningBeforeReset = 'WarningBeforeReset',
+  InvalidatedToken = 'InvalidatedToken',
+  AddSSHHost = 'AddSSHHost',
+  SSHKeyPassphrase = 'SSHKeyPassphrase',
+  SSHUserPassword = 'SSHUserPassword',
+  PullRequestChecksFailed = 'PullRequestChecksFailed',
+  CICheckRunRerun = 'CICheckRunRerun',
+  WarnForcePush = 'WarnForcePush',
+  DiscardChangesRetry = 'DiscardChangesRetry',
+  PullRequestReview = 'PullRequestReview',
+  UnreachableCommits = 'UnreachableCommits',
+  StartPullRequest = 'StartPullRequest',
+  Error = 'Error',
+  InstallingUpdate = 'InstallingUpdate',
+  TestNotifications = 'TestNotifications',
+  PullRequestComment = 'PullRequestComment',
+  UnknownAuthors = 'UnknownAuthors',
+  TestIcons = 'TestIcons',
+  ConfirmCommitFilteredChanges = 'ConfirmCommitFilteredChanges',
+  TestAbout = 'TestAbout',
+  TestCLIAction = 'TestCLIAction',
+  TestCopilotSnapshotCard = 'TestCopilotSnapshotCard',
+  PushProtectionError = 'PushProtectionError',
+  BypassPushProtection = 'BypassPushProtection',
+  GenerateCommitMessageOverrideWarning = 'GenerateCommitMessageOverrideWarning',
+  GenerateCommitMessageDisclaimer = 'GenerateCommitMessageDisclaimer',
+  CopilotConflictResolutionDisclaimer = 'CopilotConflictResolutionDisclaimer',
+  HookFailed = 'HookFailed',
+  CommitProgress = 'CommitProgress',
+  AddWorktree = 'AddWorktree',
+  RenameWorktree = 'RenameWorktree',
+  DeleteWorktree = 'DeleteWorktree',
+  EditCopilotBYOKProvider = 'EditCopilotBYOKProvider',
+  EditCopilotBYOKModel = 'EditCopilotBYOKModel',
+  CopilotUserSettings = 'CopilotUserSettings',
+  CopilotCustomProviders = 'CopilotCustomProviders',
+  ConfirmDeleteCopilotBYOKProvider = 'ConfirmDeleteCopilotBYOKProvider',
+  CopilotConflictResolutionAlwaysNudge = 'CopilotConflictResolutionAlwaysNudge',
+  DeleteWorktreeFailed = 'DeleteWorktreeFailed',
 }
 
-export type Popup =
+interface IBasePopup {
+  /**
+   * Unique id of the popup that it receives upon adding to the stack.
+   */
+  readonly id?: number
+}
+
+export type PopupDetail =
   | { type: PopupType.RenameBranch; repository: Repository; branch: Branch }
   | {
       type: PopupType.DeleteBranch
@@ -111,6 +161,25 @@ export type Popup =
     }
   | { type: PopupType.Preferences; initialSelectedTab?: PreferencesTab }
   | {
+      type: PopupType.EditCopilotBYOKProvider
+      provider: IBYOKProvider | null
+    }
+  | {
+      type: PopupType.EditCopilotBYOKModel
+      model: IBYOKModel | null
+      otherModelIds: ReadonlyArray<string>
+      onSave: (model: IBYOKModel) => void
+    }
+  | {
+      type: PopupType.CopilotUserSettings
+      account: Account
+    }
+  | { type: PopupType.CopilotCustomProviders }
+  | {
+      type: PopupType.ConfirmDeleteCopilotBYOKProvider
+      provider: IBYOKProvider
+    }
+  | {
       type: PopupType.RepositorySettings
       repository: Repository
       initialSelectedTab?: RepositorySettingsTab
@@ -127,7 +196,11 @@ export type Popup =
       initialName?: string
       targetCommit?: CommitOneLine
     }
-  | { type: PopupType.SignIn }
+  | {
+      type: PopupType.SignIn
+      isCredentialHelperSignIn?: boolean
+      credentialHelperUrl?: string
+    }
   | { type: PopupType.About }
   | { type: PopupType.InstallGit; path: string }
   | { type: PopupType.PublishRepository; repository: Repository }
@@ -148,9 +221,13 @@ export type Popup =
   | { type: PopupType.CLIInstalled }
   | {
       type: PopupType.GenericGitAuthentication
-      hostname: string
-      retryAction: RetryAction
+      remoteUrl: string
+      username?: string
+      onSubmit: (username: string, password: string) => void
+      onDismiss: () => void
     }
+  | { type: PopupType.OpenWithExternalEditor }
+  | { type: PopupType.CopilotAppNotFound }
   | {
       type: PopupType.ExternalEditorFailed
       message: string
@@ -167,7 +244,7 @@ export type Popup =
     }
   | {
       type: PopupType.ReleaseNotes
-      newRelease: ReleaseSummary
+      newReleases: ReadonlyArray<ReleaseSummary>
     }
   | {
       type: PopupType.DeletePullRequest
@@ -213,6 +290,11 @@ export type Popup =
       type: PopupType.ConfirmDiscardStash
       repository: Repository
       stash: IStashEntry
+    }
+  | {
+      type: PopupType.ConfirmCheckoutCommit
+      repository: Repository
+      commit: CommitOneLine
     }
   | {
       type: PopupType.CreateTutorialRepository
@@ -270,7 +352,7 @@ export type Popup =
     }
   | {
       type: PopupType.CommitMessage
-      coAuthors: ReadonlyArray<IAuthor>
+      coAuthors: ReadonlyArray<Author>
       showCoAuthoredBy: boolean
       commitMessage: ICommitMessage | null
       dialogTitle: string
@@ -315,12 +397,15 @@ export type Popup =
       ) => void
     }
   | {
+      type: PopupType.SSHUserPassword
+      username: string
+      onSubmit: (password: string | undefined, storePassword: boolean) => void
+    }
+  | {
       type: PopupType.PullRequestChecksFailed
       repository: RepositoryWithGitHubRepository
       pullRequest: PullRequest
-      needsSelectRepository: boolean
-      commitMessage: string
-      commitSha: string
+      shouldChangeRepository: boolean
       checks: ReadonlyArray<IRefCheck>
     }
   | {
@@ -328,5 +413,143 @@ export type Popup =
       checkRuns: ReadonlyArray<IRefCheck>
       repository: GitHubRepository
       prRef: string
+      failedOnly: boolean
     }
   | { type: PopupType.WarnForcePush; operation: string; onBegin: () => void }
+  | {
+      type: PopupType.DiscardChangesRetry
+      retryAction: RetryAction
+    }
+  | {
+      type: PopupType.PullRequestReview
+      repository: RepositoryWithGitHubRepository
+      pullRequest: PullRequest
+      review: ValidNotificationPullRequestReview
+      shouldCheckoutBranch: boolean
+      shouldChangeRepository: boolean
+    }
+  | {
+      type: PopupType.UnreachableCommits
+      selectedTab: UnreachableCommitsTab
+    }
+  | {
+      type: PopupType.StartPullRequest
+      prBaseBranches: ReadonlyArray<Branch>
+      currentBranch: Branch
+      defaultBranch: Branch | null
+      externalEditorLabel?: string
+      imageDiffType: ImageDiffType
+      prRecentBaseBranches: ReadonlyArray<Branch>
+      repository: Repository
+      nonLocalCommitSHA: string | null
+      showSideBySideDiff: boolean
+      currentBranchHasPullRequest: boolean
+    }
+  | {
+      type: PopupType.Error
+      error: Error
+    }
+  | {
+      type: PopupType.InstallingUpdate
+    }
+  | {
+      type: PopupType.TestNotifications
+      repository: RepositoryWithGitHubRepository
+    }
+  | {
+      type: PopupType.PullRequestComment
+      repository: RepositoryWithGitHubRepository
+      pullRequest: PullRequest
+      comment: IAPIComment
+      shouldCheckoutBranch: boolean
+      shouldChangeRepository: boolean
+    }
+  | {
+      type: PopupType.UnknownAuthors
+      authors: ReadonlyArray<UnknownAuthor>
+      onCommit: () => void
+    }
+  | {
+      type: PopupType.TestIcons
+    }
+  | {
+      type: PopupType.ConfirmCommitFilteredChanges
+      onCommitAnyway: () => void
+      showFilesToBeCommitted: () => void
+    }
+  | {
+      type: PopupType.TestAbout
+    }
+  | {
+      type: PopupType.TestCLIAction
+    }
+  | {
+      type: PopupType.TestCopilotSnapshotCard
+    }
+  | {
+      type: PopupType.PushProtectionError
+      secrets: ReadonlyArray<ISecretScanResult>
+    }
+  | {
+      type: PopupType.BypassPushProtection
+      secret: ISecretScanResult
+      bypassPushProtection: (
+        secret: ISecretScanResult,
+        reason: BypassReasonType
+      ) => void
+      onDismissed: () => void
+    }
+  | {
+      type: PopupType.GenerateCommitMessageOverrideWarning
+      repository: Repository
+      filesSelected: ReadonlyArray<WorkingDirectoryFileChange>
+    }
+  | {
+      type: PopupType.GenerateCommitMessageDisclaimer
+      // Same parameters as PopupType.GenerateCommitMessageOverrideWarning because
+      // from this popup we will trigger the commit message generation too.
+      repository: Repository
+      filesSelected: ReadonlyArray<WorkingDirectoryFileChange>
+    }
+  | {
+      type: PopupType.CopilotConflictResolutionDisclaimer
+      repository: Repository
+    }
+  | {
+      type: PopupType.CopilotConflictResolutionAlwaysNudge
+      repository: Repository
+    }
+  | {
+      type: PopupType.HookFailed
+      hookName: string
+      terminalOutput: TerminalOutput
+      resolve: (value: 'abort' | 'ignore') => void
+    }
+  | {
+      type: PopupType.CommitProgress
+      subscribeToCommitOutput: TerminalOutputListener
+    }
+  | {
+      type: PopupType.AddWorktree
+      repository: Repository
+      initialBranchName?: string
+      initialWorktreeName?: string
+    }
+  | {
+      type: PopupType.RenameWorktree
+      repository: Repository
+      worktreePath: string
+    }
+  | {
+      type: PopupType.DeleteWorktree
+      repository: Repository
+      worktreePath: string
+    }
+  | {
+      type: PopupType.DeleteWorktreeFailed
+      repository: Repository
+      worktreePath: string
+      error: Error
+      originalWorktree: WorktreeEntry | null
+    }
+export type Popup = IBasePopup & PopupDetail
